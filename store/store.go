@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	_ "github.com/lib/pq"
@@ -221,7 +222,7 @@ func (s *Store) MarkAsFailed(ctx context.Context, runId string, nodeId string, i
 	SET 
 	status = 'failed',
 	input = COALESCE($1, input),
-	error = $2 
+	error = $2,
 	updated_at = now()
 	WHERE
 	run_id = $3 AND node_id = $4
@@ -232,4 +233,25 @@ func (s *Store) MarkAsFailed(ctx context.Context, runId string, nodeId string, i
 	}
 
 	return nil
+}
+
+func (s *Store) MarkAsSkipped(ctx context.Context, runId string, nodeIds []string) error {
+	query := `UPDATE node_states 
+	SET 
+	status = 'skipped',
+	updated_at = now()
+	WHERE 
+	run_id = $1 AND node_id = $2
+	`
+	var Error string
+	for _, node := range nodeIds {
+		_, err := s.db.ExecContext(ctx, query, runId, node)
+		if err != nil {
+			Error += err.Error() + "\n"
+		}
+	}
+	if Error == "" {
+		return nil
+	}
+	return errors.New(Error)
 }

@@ -1,7 +1,7 @@
 package nodes
 
 // this contains the dependency map.
-// This will be a read-only map and would need to make it so that the reads don't require a mutex .. because that would be additional complexity.
+// maps in Go are safe for concurrent reads
 var Deps = map[NodeType][]NodeType{
 	Input:             {},
 	Classify:          {Input},

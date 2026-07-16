@@ -26,20 +26,23 @@ const (
 	DraftReplyUnclear NodeType = "draft_reply_unclear"
 )
 
-//Workflow looks like this: InputNode -> AgentDecisionNode (+ ToolCallNode in parallel) -> ConditionBranch Node (Bug/Billing/Unclear)
-// -> AgentDecisionNode again or HumanApprovalNode (this node can call AgentDecisionNode again as well) -> The AgentDecisionNode
-//gives the reply back to the user (returns it i.e) if it's draft reply. (That is like the ending node then I believe.)
-
-//Input Node just takes in an input string, stores it into postgres.
-//AgentDecisionNode takes in an input string (from input node) and a TASK (also makes a tool call after that). (what do you wanna do on that string). TASK = Classify or draftReply or Else. All of this is stored in postgres.
-//HumanApprovalNode takes in an input string (the issue) and a state as well and it waits ... it has a seperate table (maybe?) that is also shown in the frontend
-//Upon clicking on a button with some input a human call tell the AgentDecision Node to do something.. whose output (textual only) is shown to the user.
-//ToolCallNode takes in the tool call to be done: fetch_customer(id), fetchAccount(id), createLinearIssue(text), createInvoice(text)
-//ConditionBranch takes in the classifcation for the issue from AgentDecisionNode and decides which node to pass it to (Agent Again or HumanNode)
-
 type Node interface {
 	Type() NodeType
 	Execute(ctx context.Context, input map[string]any) (map[string]any, error) //this is the main execution function for Nodes.
+}
+
+var AllNodes = []string{
+	string(Input),
+	string(Classify),
+	string(FetchCustomer),
+	string(FetchAccount),
+	string(ChoosePath),
+	string(CreateLinearIssue),
+	string(CheckInvoice),
+	string(HumanApproval),
+	string(DraftReplyBug),
+	string(DraftReplyBilling),
+	string(DraftReplyUnclear),
 }
 
 // For when a node is skipped.
