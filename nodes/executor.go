@@ -3,19 +3,26 @@ package nodes
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"sync"
 
 	"github.com/Prateek-Gupta001/libraAIAssignment/store"
 )
 
-type Executor struct {
+type Executor interface {
+	Run(ctx context.Context, workflowId string, input map[string]any) (string, error)
+	dispatchReady(ctx context.Context, runId string) error
+	executeNode(ctx context.Context, runId string, nodeType NodeType, inputMap map[string]any, wg *sync.WaitGroup)
+	SubmitApproval(ctx context.Context, runId string, decision string) error
+}
+
+type CustomerSupportExecutor struct {
 	store *store.Store
 	nodes map[NodeType]Node
 }
 
-func NewExecutor(s *store.Store) *Executor {
-	return &Executor{
+func NewCustomerSupportExecutor(s *store.Store) *CustomerSupportExecutor {
+	return &CustomerSupportExecutor{
 		store: s,
 		nodes: map[NodeType]Node{
 			Input:             &InputNode{},
@@ -33,7 +40,7 @@ func NewExecutor(s *store.Store) *Executor {
 	}
 }
 
-func (e *Executor) Run(ctx context.Context, workflowId string, input map[string]any) (string, error) {
+func (e *CustomerSupportExecutor) Run(ctx context.Context, workflowId string, input map[string]any) (string, error) {
 	runId, err := e.store.CreateRun(ctx, workflowId, input, AllNodes)
 	if err != nil {
 		return "", err
@@ -41,7 +48,7 @@ func (e *Executor) Run(ctx context.Context, workflowId string, input map[string]
 	return runId, e.dispatchReady(ctx, runId)
 }
 
-func (e *Executor) dispatchReady(ctx context.Context, runId string) error {
+func (e *CustomerSupportExecutor) dispatchReady(ctx context.Context, runId string) error {
 	for {
 		nodeStates, err := e.store.GetNodeStates(ctx, runId)
 		if err != nil {
@@ -76,12 +83,12 @@ func (e *Executor) dispatchReady(ctx context.Context, runId string) error {
 	}
 }
 
-func (e *Executor) executeNode(ctx context.Context, runId string, nodeType NodeType, inputMap map[string]any, wg *sync.WaitGroup) {
+func (e *CustomerSupportExecutor) executeNode(ctx context.Context, runId string, nodeType NodeType, inputMap map[string]any, wg *sync.WaitGroup) {
 	defer wg.Done()
 	defer func() {
 		if r := recover(); r != nil {
 			if err := e.store.MarkAsFailed(ctx, runId, string(nodeType), inputMap, fmt.Sprintf("panic: %v", r)); err != nil {
-				log.Printf("run %s node %s: failed to persist panic: %v", runId, nodeType, err)
+				slog.Error(fmt.Sprintf("run %s node %s: failed to persist panic: %v", runId, nodeType, err))
 			}
 		}
 	}()
@@ -89,13 +96,13 @@ func (e *Executor) executeNode(ctx context.Context, runId string, nodeType NodeT
 	output, err := e.nodes[nodeType].Execute(ctx, inputMap)
 	if err != nil {
 		if storeErr := e.store.MarkAsFailed(ctx, runId, string(nodeType), inputMap, err.Error()); storeErr != nil {
-			log.Printf("run %s node %s: failed to persist failure %v: %v", runId, nodeType, err, storeErr)
+			slog.Error(fmt.Sprintf("run %s node %s: failed to persist failure %v: %v", runId, nodeType, err, storeErr))
 		}
 		return
 	}
 
 	if err := e.store.SaveNodeProgress(ctx, runId, string(nodeType), inputMap, output); err != nil {
-		log.Printf("run %s node %s: failed to persist success: %v", runId, nodeType, err)
+		slog.Error(fmt.Sprintf("run %s node %s: failed to persist success: %v", runId, nodeType, err))
 		return
 	}
 
@@ -106,12 +113,12 @@ func (e *Executor) executeNode(ctx context.Context, runId string, nodeType NodeT
 			return
 		}
 		if err := e.store.MarkAsSkipped(ctx, runId, computeSkipSet(branch, Deps)); err != nil {
-			log.Printf("run %s: failed to mark skip set: %v", runId, err)
+			slog.Error(fmt.Sprintf("run %s: failed to mark skip set: %v", runId, err))
 		}
 	}
 }
 
-func (e *Executor) SubmitApproval(ctx context.Context, runId string, decision string) error {
+func (e *CustomerSupportExecutor) SubmitApproval(ctx context.Context, runId string, decision string) error {
 	nodeStates, err := e.store.GetNodeStates(ctx, runId)
 	if err != nil {
 		return err
