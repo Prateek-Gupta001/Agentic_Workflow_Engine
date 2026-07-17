@@ -3,6 +3,8 @@ package nodes
 import (
 	"context"
 	"fmt"
+	"log"
+	"sync"
 
 	"github.com/Prateek-Gupta001/libraAIAssignment/store"
 )
@@ -31,68 +33,106 @@ func NewExecutor(s *store.Store) *Executor {
 	}
 }
 
-// Now let's write the main executor loop for this DAG workflow.
-func (e *Executor) Run(ctx context.Context, workflowId string, input map[string]any, nodeIDs []string) error {
-	runId, err := e.store.CreateRun(ctx, "customer_support_v1", input, AllNodes)
+func (e *Executor) Run(ctx context.Context, workflowId string, input map[string]any) (string, error) {
+	runId, err := e.store.CreateRun(ctx, workflowId, input, AllNodes)
 	if err != nil {
-		return err
+		return "", err
 	}
-	//Now we need to execute the nodes.
-	//How do we do that?
-	//Well .. we can look at the current state of nodes to see which all are pending.
-	//Given their pending/not pending states + the MAP state + you can find two things:
-	//The current input map + WHICH NODE(S) executed.
-	//Once you find those .. execute them! using go routines.
+	return runId, e.dispatchReady(ctx, runId)
+}
+
+func (e *Executor) dispatchReady(ctx context.Context, runId string) error {
 	for {
 		nodeStates, err := e.store.GetNodeStates(ctx, runId)
 		if err != nil {
-			return nil
+			return err
 		}
-		inputMap := GetInputMap(nodeStates)
-		NodesToBeExecuted := NodesReadyForExecution(nodeStates, Deps, e.nodes)
-		if len(NodesToBeExecuted) == 0 {
-			break
+		ready := NodesReadyForExecution(nodeStates, Deps, e.nodes)
+		if len(ready) == 0 {
+			return nil // fixed point — either done, or parked on an approval
 		}
-		for _, node := range NodesToBeExecuted {
-			err := e.store.MarkAsRunning(ctx, runId, string(node.Type()), inputMap)
-			if err != nil {
-				err := e.store.MarkAsFailed(ctx, runId, string(node.Type()), inputMap, err.Error())
-				if err != nil {
+
+		var wg sync.WaitGroup
+		for _, node := range ready {
+			nodeType := node.Type()
+			inputMap := GetInputMap(nodeStates)
+
+			if nodeType == HumanApproval {
+				// Park it. Don't call Execute, don't wg.Add — an external
+				// event (the approve/reject call) resumes this later.
+				if err := e.store.MarkAwaitingApproval(ctx, runId, string(nodeType), inputMap); err != nil {
 					return err
 				}
+				continue
+			}
+
+			if err := e.store.MarkAsRunning(ctx, runId, string(nodeType), inputMap); err != nil {
 				return err
 			}
-			output, err := node.Execute(ctx, inputMap)
-			if err != nil {
-				err := e.store.MarkAsFailed(ctx, runId, string(node.Type()), inputMap, err.Error())
-				if err != nil {
-					return err
-				}
-				return err
+			wg.Add(1)
+			go e.executeNode(ctx, runId, nodeType, inputMap, &wg)
+		}
+		wg.Wait()
+	}
+}
+
+func (e *Executor) executeNode(ctx context.Context, runId string, nodeType NodeType, inputMap map[string]any, wg *sync.WaitGroup) {
+	defer wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			if err := e.store.MarkAsFailed(ctx, runId, string(nodeType), inputMap, fmt.Sprintf("panic: %v", r)); err != nil {
+				log.Printf("run %s node %s: failed to persist panic: %v", runId, nodeType, err)
 			}
-			//how do we get the ouptut OF THE NODE THAT JUST EXECUTED. currently output contains the full map.
-			//we could range over the map maybe?
-			err = e.store.SaveNodeProgress(ctx, runId, string(node.Type()), inputMap, output)
-			if node.Type() == ChoosePath {
-				branch, ok := output["branch"].(string)
-				if !ok {
-					return fmt.Errorf("choose_path output missing branch")
-				}
-				if err := e.store.MarkAsSkipped(ctx, runId, computeSkipSet(branch, Deps)); err != nil {
-					return err
-				}
-			}
-			if err != nil {
-				return err
-			}
+		}
+	}()
+
+	output, err := e.nodes[nodeType].Execute(ctx, inputMap)
+	if err != nil {
+		if storeErr := e.store.MarkAsFailed(ctx, runId, string(nodeType), inputMap, err.Error()); storeErr != nil {
+			log.Printf("run %s node %s: failed to persist failure %v: %v", runId, nodeType, err, storeErr)
+		}
+		return
+	}
+
+	if err := e.store.SaveNodeProgress(ctx, runId, string(nodeType), inputMap, output); err != nil {
+		log.Printf("run %s node %s: failed to persist success: %v", runId, nodeType, err)
+		return
+	}
+
+	if nodeType == ChoosePath {
+		branch, ok := output["branch"].(string)
+		if !ok {
+			e.store.MarkAsFailed(ctx, runId, string(nodeType), inputMap, "choose_path output missing branch")
+			return
+		}
+		if err := e.store.MarkAsSkipped(ctx, runId, computeSkipSet(branch, Deps)); err != nil {
+			log.Printf("run %s: failed to mark skip set: %v", runId, err)
 		}
 	}
-	//A few things... we don't have parallel execution yet. We would need to fire off go routines for that.
-	//Also handle the skipping thing. If a nodes get skipped then all the nodes that depends upon that node should get skipped.
-	//Only those nodes are ready for execution whose dependency nodes (the nodes THAT node depends upon) have the status as
-	//'completed'
-	return nil
+}
 
+func (e *Executor) SubmitApproval(ctx context.Context, runId string, decision string) error {
+	nodeStates, err := e.store.GetNodeStates(ctx, runId)
+	if err != nil {
+		return err
+	}
+	state, ok := nodeStates[string(HumanApproval)]
+	if !ok || state.Status != "awaiting_approval" {
+		return fmt.Errorf("human_approval is not awaiting approval (status=%s)", state.Status)
+	}
+
+	inputMap := GetInputMap(nodeStates)
+	inputMap["humanDecision"] = decision
+
+	output, err := e.nodes[HumanApproval].Execute(ctx, inputMap)
+	if err != nil {
+		return e.store.MarkAsFailed(ctx, runId, string(HumanApproval), inputMap, err.Error())
+	}
+	if err := e.store.SaveNodeProgress(ctx, runId, string(HumanApproval), inputMap, output); err != nil {
+		return err
+	}
+
+	return e.dispatchReady(ctx, runId) // resumes — DraftReplyUnclear is now unblocked
 }
 
 func GetInputMap(nodeStates map[string]store.NodeState) map[string]any {

@@ -158,13 +158,17 @@ func (i *CheckInvoiceNode) Execute(ctx context.Context, input map[string]any) (m
 	return out, nil
 }
 
-type HumanApprovalNode struct{}
+type HumanApprovalNode struct {
+}
 
 func (n *HumanApprovalNode) Type() NodeType { return HumanApproval }
 func (n *HumanApprovalNode) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	decision, ok := input["humanDecision"].(string)
 	if !ok {
 		return nil, errors.New("humanDecision field is required")
+	}
+	if decision != "approved" && decision != "rejected" {
+		return nil, fmt.Errorf("humanDecision must be 'approved' or 'rejected', got %q", decision)
 	}
 	out := maps.Clone(input)
 	out["humanDecision"] = decision

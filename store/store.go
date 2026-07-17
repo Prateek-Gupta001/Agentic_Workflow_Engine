@@ -243,15 +243,24 @@ func (s *Store) MarkAsSkipped(ctx context.Context, runId string, nodeIds []strin
 	WHERE 
 	run_id = $1 AND node_id = $2
 	`
-	var Error string
+	var errs []error
 	for _, node := range nodeIds {
-		_, err := s.db.ExecContext(ctx, query, runId, node)
-		if err != nil {
-			Error += err.Error() + "\n"
+		if _, err := s.db.ExecContext(ctx, query, runId, node); err != nil {
+			errs = append(errs, fmt.Errorf("skipping %s: %w", node, err))
 		}
 	}
-	if Error == "" {
-		return nil
+	return errors.Join(errs...)
+}
+
+func (s *Store) MarkAwaitingApproval(ctx context.Context, runId, nodeId string, input map[string]any) error {
+	var inputJson []byte
+	var err error
+	if input != nil {
+		if inputJson, err = json.Marshal(input); err != nil {
+			return fmt.Errorf("marshaling input for node %s: %w", nodeId, err)
+		}
 	}
-	return errors.New(Error)
+	const query = `UPDATE node_states SET status = 'awaiting_approval', input = COALESCE($1, input), updated_at = now() WHERE run_id = $2 AND node_id = $3`
+	_, err = s.db.ExecContext(ctx, query, inputJson, runId, nodeId)
+	return err
 }
