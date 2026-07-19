@@ -25,6 +25,30 @@ func NewDAGWorkflow(executor nodes.Executor, listenAddr string) *DAGWorkflow {
 	}
 }
 
+type RunSummaryResponse struct {
+	ID        string    `json:"id"`
+	Status    string    `json:"status"`
+	Request   string    `json:"request"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (s *DAGWorkflow) ListRuns(w http.ResponseWriter, r *http.Request) *APIError {
+	runs, err := s.executor.ListRecentRuns(r.Context(), 10)
+	if err != nil {
+		return &APIError{
+			Status:  http.StatusInternalServerError,
+			Error:   err,
+			Message: "We are experiencing some difficulties right now. Please try again later.",
+		}
+	}
+	resp := make([]RunSummaryResponse, 0, len(runs))
+	for _, run := range runs {
+		resp = append(resp, RunSummaryResponse{ID: run.ID, Status: run.Status, Request: run.Request, CreatedAt: run.CreatedAt})
+	}
+	WriteJSON(w, http.StatusOK, resp)
+	return nil
+}
+
 func (s *DAGWorkflow) Run(ctx context.Context, stop context.CancelFunc) (err error) {
 	defer stop()
 
@@ -65,7 +89,8 @@ func (s *DAGWorkflow) newHTTPHandler() http.Handler {
 	r.HandleFunc("GET /v1/runs/{id}/approval", convertToHandleFunc(s.PollHumanApprovalNode))
 	r.HandleFunc("POST /v1/runs/{id}/approval", convertToHandleFunc(s.SubmittingHumanApproval))
 	r.HandleFunc("POST /v1/runs/{id}/nodes/{nodeId}/retry", convertToHandleFunc(s.RetryNode))
-	return RunContextMiddleware(r)
+	r.HandleFunc("GET /v1/runs", convertToHandleFunc(s.ListRuns))
+	return CorsMiddleware(RunContextMiddleware(r))
 }
 
 type apiFunc func(w http.ResponseWriter, r *http.Request) *APIError
@@ -271,8 +296,14 @@ func (s *DAGWorkflow) SubmittingHumanApproval(w http.ResponseWriter, r *http.Req
 		}
 	}()
 
-	WriteJSON(w, http.StatusAccepted, struct{}{})
+	WriteJSON(w, http.StatusAccepted, HumanApprovalSubmitted{
+		Message: "Approval Submitted",
+	})
 	return nil
+}
+
+type HumanApprovalSubmitted struct {
+	Message string `json:"message"`
 }
 
 func (s *DAGWorkflow) RetryNode(w http.ResponseWriter, r *http.Request) *APIError {

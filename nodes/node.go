@@ -76,7 +76,7 @@ func (i *FetchCustomerNode) Execute(ctx context.Context, input map[string]any) (
 		return nil, errors.New("customerId field is required!")
 	}
 	out := maps.Clone(input)
-	out["customerContext"] = out["customerContext"]
+	out["customerContext"] = "MOCK-CUSTOMER-DATA"
 
 	return out, nil
 }
@@ -113,7 +113,7 @@ func (i *ClassifyNode) Execute(ctx context.Context, input map[string]any) (map[s
 	}
 
 	out := maps.Clone(input)
-	out["task"] = output
+	out["classification"] = output
 
 	return out, nil
 }
@@ -123,11 +123,11 @@ type ChoosePathNode struct{}
 func (i *ChoosePathNode) Type() NodeType { return ChoosePath }
 func (i *ChoosePathNode) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
 	//this node just chooses the path based on the Classify node.
-	if _, ok := input["task"]; ok != true {
-		return nil, errors.New("task field is required!")
+	if _, ok := input["classification"]; ok != true {
+		return nil, errors.New("classification field is required!")
 	}
 	out := maps.Clone(input)
-	out["branch"] = input["task"]
+	out["branch"] = input["classification"]
 	slog.Info("Map after choose path execution", "map", out)
 	return out, nil
 }

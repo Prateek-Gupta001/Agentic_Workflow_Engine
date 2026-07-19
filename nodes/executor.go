@@ -19,6 +19,7 @@ type Executor interface {
 	GetApprovalState(ctx context.Context, runId string) (found bool, status string, input map[string]any, err error)
 	GetNodeStatus(ctx context.Context, runId, nodeId string) (found bool, status string, err error)
 	SubmitRetry(ctx context.Context, runId, nodeId string) error
+	ListRecentRuns(ctx context.Context, limit int) ([]store.RunSummary, error)
 }
 
 type CustomerSupportExecutor struct {
@@ -78,7 +79,7 @@ func (e *CustomerSupportExecutor) dispatchReady(ctx context.Context, runId strin
 		}
 		ready := NodesReadyForExecution(nodeStates, Deps, e.nodes)
 		if len(ready) == 0 {
-			return nil // fixed point — either done, or parked on an approval
+			return e.finalizeRun(ctx, runId, nodeStates)
 		}
 
 		var wg sync.WaitGroup
@@ -207,102 +208,6 @@ func (e *CustomerSupportExecutor) GetApprovalState(ctx context.Context, runId st
 	return true, state.Status, state.Input, nil
 }
 
-var TerminalNodes = []NodeType{DraftReplyBug, DraftReplyBilling, DraftReplyUnclear}
-
-func GetInputMap(nodeStates map[string]store.NodeState) map[string]any {
-	merged := make(map[string]any)
-	for _, state := range nodeStates {
-		if state.Status != "completed" {
-			continue
-		}
-		for k, v := range state.Output {
-			merged[k] = v
-		}
-	}
-	return merged
-}
-
-// TODO: This has to be done at every node execution pass .. can this be optimized?
-func NodesReadyForExecution(
-	nodeStates map[string]store.NodeState,
-	deps map[NodeType][]NodeType,
-	registry map[NodeType]Node,
-) []Node {
-	var ready []Node
-	for nodeType, dependencies := range deps {
-		state, exists := nodeStates[string(nodeType)]
-		if !exists || state.Status != "pending" {
-			continue
-		}
-		allDepsCompleted := true
-		for _, dep := range dependencies {
-			depState, ok := nodeStates[string(dep)]
-			if !ok || depState.Status != "completed" {
-				allDepsCompleted = false
-				break
-			}
-		}
-		if allDepsCompleted {
-			ready = append(ready, registry[nodeType])
-		}
-	}
-	return ready
-}
-
-var branchRoot = map[string]NodeType{
-	"bug":     CreateLinearIssue,
-	"billing": CheckInvoice,
-	"unclear": HumanApproval,
-}
-
-// computeSkipSet returns every node that should be marked skipped given the
-// chosen branch: the two branch roots not taken, plus everything that
-// transitively depends on them.
-func computeSkipSet(chosenBranch string, deps map[NodeType][]NodeType) []string {
-	skip := make(map[NodeType]bool)
-	for branch, nodeType := range branchRoot {
-		if branch != chosenBranch {
-			skip[nodeType] = true
-		}
-	}
-	for {
-		added := false
-		for nodeType, dependencies := range deps {
-			if skip[nodeType] {
-				continue
-			}
-			for _, dep := range dependencies {
-				if skip[dep] {
-					skip[nodeType] = true
-					added = true
-					break
-				}
-			}
-		}
-		if !added {
-			break
-		}
-	}
-	result := make([]string, 0, len(skip))
-	for nodeType := range skip {
-		result = append(result, string(nodeType))
-	}
-	slog.Info("For this chosen branch", "branch", chosenBranch, "the skip set computed is this", result)
-	return result
-}
-
-func (e *CustomerSupportExecutor) GetNodeStatus(ctx context.Context, runId, nodeId string) (found bool, status string, err error) {
-	nodeStates, err := e.store.GetNodeStates(ctx, runId)
-	if err != nil {
-		return false, "", err
-	}
-	state, ok := nodeStates[nodeId]
-	if !ok {
-		return false, "", nil
-	}
-	return true, state.Status, nil
-}
-
 func (e *CustomerSupportExecutor) SubmitRetry(ctx context.Context, runId, nodeId string) error {
 	reset, err := e.store.ResetToPending(ctx, runId, nodeId)
 	if err != nil {
@@ -312,4 +217,25 @@ func (e *CustomerSupportExecutor) SubmitRetry(ctx context.Context, runId, nodeId
 		return nil // already retried elsewhere — not an error, just nothing to do
 	}
 	return e.dispatchReady(ctx, runId)
+}
+
+// finalizeRun runs once dispatchReady's loop hits a fixed point — nothing
+// left pending-and-ready. Called from the one place that already knows the
+// run is either done, blocked on approval, or genuinely stuck.
+func (e *CustomerSupportExecutor) finalizeRun(ctx context.Context, runId string, nodeStates map[string]store.NodeState) error {
+	for _, t := range TerminalNodes {
+		if state, ok := nodeStates[string(t)]; ok && state.Status == "completed" {
+			return e.store.CompleteRun(ctx, runId, state.Output)
+		}
+	}
+	for _, state := range nodeStates {
+		if state.Status == "failed" {
+			return e.store.FailRun(ctx, runId)
+		}
+	}
+	return nil // parked on human_approval — workflow_runs.status correctly stays 'running'
+}
+
+func (e *CustomerSupportExecutor) ListRecentRuns(ctx context.Context, limit int) ([]store.RunSummary, error) {
+	return e.store.ListRecentRuns(ctx, limit)
 }

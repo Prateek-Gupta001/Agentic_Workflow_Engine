@@ -97,16 +97,20 @@
   #reply-banner .label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--c-completed); margin-bottom:6px;}
   #reply-banner .text{font-size:15px;}
 
-  .tier{position:relative; margin-bottom:8px;}
-  .tier-connector{
-    width:1px; height:20px; background:var(--border-strong); margin:0 auto;
+  #dag{position:relative;}
+  #dag-edges{position:absolute; top:0; left:0; pointer-events:none; z-index:0; overflow:visible;}
+  .tier-row{
+    position:relative; z-index:1;
+    display:flex; justify-content:center; align-items:flex-start; gap:28px;
+    margin-bottom:56px;
   }
-  .tier-connector::after{content:''; display:block;}
-  .tier-row{display:grid; gap:12px; grid-template-columns:repeat(var(--cols,1), 1fr);}
+  .tier-row:last-child{margin-bottom:0;}
 
   .card{
+    width:212px; flex:0 0 auto;
     background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
-    padding:12px 14px; transition:border-color .15s;
+    padding:12px 14px; transition:border-color .15s, box-shadow .15s;
+    box-shadow:0 1px 3px rgba(20,20,15,0.05);
   }
   .card.status-running{border-color:var(--c-running);}
   .card.status-failed{border-color:var(--c-failed);}
@@ -148,9 +152,38 @@
   #toast.visible{display:block;}
 
   @media (max-width:640px){
-    .tier-row{grid-template-columns:1fr !important;}
+    .tier-row{flex-direction:column; align-items:stretch; gap:12px; margin-bottom:32px;}
+    .card{width:100%;}
+    #dag-edges{display:none;}
     main{padding:16px;}
   }
+
+  #tab-bar{display:flex; gap:4px; margin-bottom:14px;}
+  .tab-btn{
+    appearance:none; border:none; background:transparent; padding:8px 4px; margin-right:16px;
+    font-size:13px; font-weight:600; font-family:var(--sans); color:var(--text-muted);
+    cursor:pointer; border-bottom:2px solid transparent;
+  }
+  .tab-btn.active{color:var(--text); border-bottom-color:var(--accent);}
+  .tab-btn:hover{color:var(--text);}
+
+  #past-runs-panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:6px; margin-bottom:24px;
+  }
+  #past-runs-empty{padding:18px; font-size:13px; color:var(--text-muted); text-align:center;}
+  .run-row{
+    display:flex; align-items:center; gap:12px; width:100%; padding:10px 10px;
+    border:none; background:transparent; border-radius:6px; cursor:pointer; font-family:var(--sans); text-align:left;
+  }
+  .run-row:hover{background:var(--bg);}
+  .run-row + .run-row{border-top:1px solid var(--border); border-radius:0;}
+  .run-row .badge{flex:0 0 auto;}
+  .run-row .run-request{
+    flex:1 1 auto; min-width:0; font-size:13px; color:var(--text);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .run-row .run-time{flex:0 0 auto; font-size:11px; color:var(--text-faint); font-family:var(--mono);}
 </style>
 </head>
 <body>
@@ -165,12 +198,21 @@
 
 <main>
 
+  <div id="tab-bar">
+    <button class="tab-btn active" id="tab-new">New request</button>
+    <button class="tab-btn" id="tab-past">Past runs</button>
+  </div>
+
   <section id="submit-panel">
     <label for="req-text">Customer request</label>
     <textarea id="req-text" placeholder="e.g. My invoice charge looks wrong this month, can you check?"></textarea>
     <div id="submit-row">
       <button class="btn btn-primary" id="submit-btn">Submit request</button>
     </div>
+  </section>
+
+  <section id="past-runs-panel" style="display:none;">
+    <div id="past-runs-list"><div id="past-runs-empty">Loading…</div></div>
   </section>
 
   <section id="run-panel">
@@ -202,6 +244,12 @@ const TIERS = [
   [{id:'draft_reply_bug', label:'Draft reply (bug)'}, {id:'draft_reply_billing', label:'Draft reply (billing)'}, {id:'draft_reply_unclear', label:'Draft reply (unclear)'}],
 ];
 const TERMINAL_NODES = ['draft_reply_bug', 'draft_reply_billing', 'draft_reply_unclear'];
+const EDGES = [
+  ['input', 'classify'], ['input', 'fetch_customer'], ['input', 'fetch_account'],
+  ['classify', 'choose_path'], ['fetch_customer', 'choose_path'], ['fetch_account', 'choose_path'],
+  ['choose_path', 'create_linear_issue'], ['choose_path', 'check_invoice'], ['choose_path', 'human_approval'],
+  ['create_linear_issue', 'draft_reply_bug'], ['check_invoice', 'draft_reply_billing'], ['human_approval', 'draft_reply_unclear'],
+];
 
 let runId = null;
 let pollTimer = null;
@@ -256,14 +304,7 @@ $('#submit-btn').addEventListener('click', async () => {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({req: text}),
     });
-    runId = data.req_id;
-    expanded = new Set();
-    busyNodes = new Set();
-    $('#run-id').textContent = 'run: ' + runId;
-    $('#run-panel').classList.add('visible');
-    $('#reply-banner').classList.remove('visible');
-    buildDag();
-    startPolling();
+    openRun(data.req_id);
   } catch (e) {
     showToast(e.message);
   } finally {
@@ -271,22 +312,78 @@ $('#submit-btn').addEventListener('click', async () => {
   }
 });
 
+// Shared entry point for viewing a run, whether it just started or it's a
+// past run selected from the list — same reset, same dag/poll wiring either way.
+function openRun(id) {
+  runId = id;
+  expanded = new Set();
+  busyNodes = new Set();
+  $('#run-id').textContent = 'run: ' + runId;
+  $('#run-panel').classList.add('visible');
+  $('#reply-banner').classList.remove('visible');
+  buildDag();
+  startPolling();
+}
+
+// ---- tabs / past runs ----
+
+$('#tab-new').addEventListener('click', () => switchTab('new'));
+$('#tab-past').addEventListener('click', () => switchTab('past'));
+
+function switchTab(tab) {
+  $('#tab-new').classList.toggle('active', tab === 'new');
+  $('#tab-past').classList.toggle('active', tab === 'past');
+  $('#submit-panel').style.display = tab === 'new' ? '' : 'none';
+  $('#past-runs-panel').style.display = tab === 'past' ? '' : 'none';
+  if (tab === 'past') loadPastRuns();
+}
+
+function formatTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleString(undefined, {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+}
+
+async function loadPastRuns() {
+  const list = $('#past-runs-list');
+  list.innerHTML = '<div id="past-runs-empty">Loading…</div>';
+  let runs;
+  try {
+    runs = await apiFetch('/v1/runs');
+  } catch (e) {
+    list.innerHTML = `<div id="past-runs-empty">${escapeHtml(e.message)}</div>`;
+    return;
+  }
+  if (!runs || runs.length === 0) {
+    list.innerHTML = '<div id="past-runs-empty">No runs yet — submit a request to see it here.</div>';
+    return;
+  }
+  list.innerHTML = '';
+  runs.forEach(run => {
+    const status = run.status || 'running';
+    const row = document.createElement('button');
+    row.className = 'run-row';
+    row.innerHTML = `
+      <span class="badge ${status}">${status.replace('_', ' ')}</span>
+      <span class="run-request">${escapeHtml(run.request || '(no request text)')}</span>
+      <span class="run-time">${formatTime(run.created_at)}</span>
+    `;
+    row.addEventListener('click', () => {
+      switchTab('new'); // drop back to the main view so the loaded flowchart is visible
+      openRun(run.id);
+    });
+    list.appendChild(row);
+  });
+}
+
 // ---- dag rendering ----
 
 function buildDag() {
   const dag = $('#dag');
-  dag.innerHTML = '';
-  TIERS.forEach((tier, i) => {
-    if (i > 0) {
-      const conn = document.createElement('div');
-      conn.className = 'tier-connector';
-      dag.appendChild(conn);
-    }
-    const wrap = document.createElement('div');
-    wrap.className = 'tier';
+  dag.innerHTML = '<svg id="dag-edges"></svg>';
+  TIERS.forEach((tier) => {
     const row = document.createElement('div');
     row.className = 'tier-row';
-    row.style.setProperty('--cols', tier.length);
     tier.forEach(n => {
       const card = document.createElement('div');
       card.className = 'card status-pending';
@@ -304,18 +401,63 @@ function buildDag() {
       `;
       row.appendChild(card);
     });
-    wrap.appendChild(row);
-    dag.appendChild(wrap);
+    dag.appendChild(row);
   });
   dag.querySelectorAll('[data-toggle]').forEach(el => {
     el.addEventListener('click', () => {
       const id = el.getAttribute('data-toggle');
       if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
       $('#detail-' + id).classList.toggle('open', expanded.has(id));
+      drawEdges();
     });
   });
   dagBuilt = true;
+  requestAnimationFrame(drawEdges);
 }
+
+// Draws curved connectors between actual card positions, so the DAG reads
+// as a diagram rather than a stack of cards. Recomputed whenever layout can
+// change: after build, after each poll, after expand/collapse, and on resize.
+function drawEdges() {
+  const dag = $('#dag');
+  const svg = $('#dag-edges');
+  if (!dag || !svg) return;
+  const dagRect = dag.getBoundingClientRect();
+  const w = dag.scrollWidth;
+  const h = dag.scrollHeight;
+  svg.setAttribute('width', w);
+  svg.setAttribute('height', h);
+  svg.setAttribute('viewBox', `0 0 ${w} ${h}`);
+
+  const defs = `<defs><marker id="arrowhead" viewBox="0 0 10 10" refX="8" refY="5"
+    markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+    <path d="M1 1L9 5L1 9" fill="none" stroke="#b0aea3" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+  </marker></defs>`;
+
+  let paths = '';
+  EDGES.forEach(([fromId, toId]) => {
+    const fromEl = document.getElementById('card-' + fromId);
+    const toEl = document.getElementById('card-' + toId);
+    if (!fromEl || !toEl) return;
+    const f = fromEl.getBoundingClientRect();
+    const t = toEl.getBoundingClientRect();
+    const x1 = f.left + f.width / 2 - dagRect.left;
+    const y1 = f.bottom - dagRect.top;
+    const x2 = t.left + t.width / 2 - dagRect.left;
+    const y2 = t.top - dagRect.top;
+    const midY = (y1 + y2) / 2;
+    paths += `<path d="M${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}"
+      fill="none" stroke="#b0aea3" stroke-width="1.6" marker-end="url(#arrowhead)"/>`;
+  });
+
+  svg.innerHTML = defs + paths;
+}
+
+let edgeResizeTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(edgeResizeTimer);
+  edgeResizeTimer = setTimeout(drawEdges, 150);
+});
 
 function pretty(obj) {
   if (obj === null || obj === undefined) return '—';
@@ -423,6 +565,7 @@ async function pollState() {
   }
   TIERS.flat().forEach(node => renderNode(node, states[node.id]));
   updateOverallStatus(states);
+  drawEdges();
 }
 
 // ---- actions ----
