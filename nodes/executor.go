@@ -10,10 +10,15 @@ import (
 )
 
 type Executor interface {
-	Run(ctx context.Context, workflowId string, input map[string]any) (string, error)
+	Run(ctx context.Context, runId string, workflowId string, input map[string]any) error
 	dispatchReady(ctx context.Context, runId string) error
 	executeNode(ctx context.Context, runId string, nodeType NodeType, inputMap map[string]any, wg *sync.WaitGroup)
 	SubmitApproval(ctx context.Context, runId string, decision string) error
+	GetNodeStates(ctx context.Context, runId string) (map[string]store.NodeState, error)
+	GetResult(ctx context.Context, runId string) (found bool, status string, output map[string]any, err error)
+	GetApprovalState(ctx context.Context, runId string) (found bool, status string, input map[string]any, err error)
+	GetNodeStatus(ctx context.Context, runId, nodeId string) (found bool, status string, err error)
+	SubmitRetry(ctx context.Context, runId, nodeId string) error
 }
 
 type CustomerSupportExecutor struct {
@@ -40,12 +45,12 @@ func NewCustomerSupportExecutor(s *store.Store) *CustomerSupportExecutor {
 	}
 }
 
-func (e *CustomerSupportExecutor) Run(ctx context.Context, workflowId string, input map[string]any) (string, error) {
-	runId, err := e.store.CreateRun(ctx, workflowId, input, AllNodes)
+func (e *CustomerSupportExecutor) Run(ctx context.Context, runId string, workflowId string, input map[string]any) error {
+	runId, err := e.store.CreateRun(ctx, runId, workflowId, input, AllNodes)
 	if err != nil {
-		return "", err
+		return err
 	}
-	return runId, e.dispatchReady(ctx, runId)
+	return e.dispatchReady(ctx, runId)
 }
 
 func (e *CustomerSupportExecutor) dispatchReady(ctx context.Context, runId string) error {
@@ -62,6 +67,7 @@ func (e *CustomerSupportExecutor) dispatchReady(ctx context.Context, runId strin
 		var wg sync.WaitGroup
 		for _, node := range ready {
 			nodeType := node.Type()
+			state := nodeStates[string(nodeType)]
 			inputMap := GetInputMap(nodeStates)
 
 			if nodeType == HumanApproval {
@@ -72,7 +78,8 @@ func (e *CustomerSupportExecutor) dispatchReady(ctx context.Context, runId strin
 				}
 				continue
 			}
-
+			//THIS IS FOR TESTING RETRIALS.
+			inputMap["_attempt"] = state.AttemptCount + 1 // the attempt about to happen
 			if err := e.store.MarkAsRunning(ctx, runId, string(nodeType), inputMap); err != nil {
 				return err
 			}
@@ -141,6 +148,49 @@ func (e *CustomerSupportExecutor) SubmitApproval(ctx context.Context, runId stri
 
 	return e.dispatchReady(ctx, runId) // resumes — DraftReplyUnclear is now unblocked
 }
+
+func (e *CustomerSupportExecutor) GetNodeStates(ctx context.Context, runId string) (map[string]store.NodeState, error) {
+	return e.store.GetNodeStates(ctx, runId)
+}
+
+// GetResult reports whether a run has reached a terminal state. found=false
+// means the run_id doesn't exist at all — distinct from "still running",
+// which the handler needs to return 404 vs 200 correctly.
+func (e *CustomerSupportExecutor) GetResult(ctx context.Context, runId string) (found bool, status string, output map[string]any, err error) {
+	states, err := e.store.GetNodeStates(ctx, runId)
+	if err != nil {
+		return false, "", nil, err
+	}
+	if len(states) == 0 {
+		return false, "", nil, nil
+	}
+	for _, t := range TerminalNodes {
+		if state, ok := states[string(t)]; ok && state.Status == "completed" {
+			return true, "completed", state.Output, nil
+		}
+	}
+	for _, state := range states {
+		if state.Status == "failed" {
+			return true, "failed", nil, nil
+		}
+	}
+	//todo: Is this like all right? What if it's pending or whatever? Ig it's alright.
+	return true, "running", nil, nil
+}
+
+func (e *CustomerSupportExecutor) GetApprovalState(ctx context.Context, runId string) (found bool, status string, input map[string]any, err error) {
+	states, err := e.store.GetNodeStates(ctx, runId)
+	if err != nil {
+		return false, "", nil, err
+	}
+	if len(states) == 0 {
+		return false, "", nil, nil
+	}
+	state := states[string(HumanApproval)] // row always exists — CreateRun seeds every node in AllNodes as 'pending'
+	return true, state.Status, state.Input, nil
+}
+
+var TerminalNodes = []NodeType{DraftReplyBug, DraftReplyBilling, DraftReplyUnclear}
 
 func GetInputMap(nodeStates map[string]store.NodeState) map[string]any {
 	merged := make(map[string]any)
@@ -221,4 +271,27 @@ func computeSkipSet(chosenBranch string, deps map[NodeType][]NodeType) []string 
 		result = append(result, string(nodeType))
 	}
 	return result
+}
+
+func (e *CustomerSupportExecutor) GetNodeStatus(ctx context.Context, runId, nodeId string) (found bool, status string, err error) {
+	nodeStates, err := e.store.GetNodeStates(ctx, runId)
+	if err != nil {
+		return false, "", err
+	}
+	state, ok := nodeStates[nodeId]
+	if !ok {
+		return false, "", nil
+	}
+	return true, state.Status, nil
+}
+
+func (e *CustomerSupportExecutor) SubmitRetry(ctx context.Context, runId, nodeId string) error {
+	reset, err := e.store.ResetToPending(ctx, runId, nodeId)
+	if err != nil {
+		return err
+	}
+	if !reset {
+		return nil // already retried elsewhere — not an error, just nothing to do
+	}
+	return e.dispatchReady(ctx, runId)
 }

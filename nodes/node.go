@@ -132,16 +132,26 @@ func (i *ChoosePathNode) Execute(ctx context.Context, input map[string]any) (map
 type CreateLinearIssueNode struct{}
 
 func (I *CreateLinearIssueNode) Type() NodeType { return CreateLinearIssue }
-func (i *CreateLinearIssueNode) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
-
-	branch, ok := input["branch"].(string)
-	if !ok || branch != "bug" {
-		//TODO: NEED A LOG HERE.
-		return nil, ErrNodeSkipped
+func (n *CreateLinearIssueNode) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
+	text, ok := input["request"].(string)
+	if !ok {
+		return nil, errors.New("request field is required")
+	}
+	attempt, _ := input["_attempt"].(int)
+	issue, err := mockCreateLinearIssue(text, attempt)
+	if err != nil {
+		return nil, err
 	}
 	out := maps.Clone(input)
-	out["linearIssue"] = "MOCK-LINEAR-ISSUE" //TODO: Maybe get it from postgres too?
+	out["linearIssue"] = issue
 	return out, nil
+}
+
+func mockCreateLinearIssue(text string, attempt int) (string, error) {
+	if attempt < 2 {
+		return "", errors.New("mock Linear API timeout")
+	}
+	return "MOCK-LINEAR-ISSUE-42", nil
 }
 
 type CheckInvoiceNode struct{}

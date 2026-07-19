@@ -7,14 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 
 	_ "github.com/lib/pq"
 )
 
 type Store struct{ db *sql.DB }
 
-func New(dsn string) (*Store, error) {
-	db, err := sql.Open("postgres", dsn)
+func NewStore() (*Store, error) {
+	dbPassword := os.Getenv("DB_PASSWORD")
+	connStr := fmt.Sprintf("host=127.0.0.1 port=5432 user=postgres dbname=postgres password=%s sslmode=disable", dbPassword)
+	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
 	}
@@ -58,7 +61,7 @@ func (s *Store) InitSchema(ctx context.Context) error {
 
 // What are the different methods that we really want for this ...
 // We need to create a new run whenever we get a new request.
-func (s *Store) CreateRun(ctx context.Context, workflowID string, input map[string]any, nodeIDs []string) (string, error) {
+func (s *Store) CreateRun(ctx context.Context, runId string, workflowID string, input map[string]any, nodeIDs []string) (string, error) {
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
 		return "", fmt.Errorf("marshaling input: %w", err)
@@ -72,8 +75,8 @@ func (s *Store) CreateRun(ctx context.Context, workflowID string, input map[stri
 
 	var runID string
 	err = tx.QueryRowContext(ctx,
-		`INSERT INTO workflow_runs (workflow_id, input) VALUES ($1, $2) RETURNING id`,
-		workflowID, inputJSON,
+		`INSERT INTO workflow_runs (id, workflow_id, input) VALUES ($1, $2, $3) RETURNING id`,
+		runId, workflowID, inputJSON,
 	).Scan(&runID)
 	if err != nil {
 		return "", fmt.Errorf("inserting run: %w", err)
@@ -263,4 +266,14 @@ func (s *Store) MarkAwaitingApproval(ctx context.Context, runId, nodeId string, 
 	const query = `UPDATE node_states SET status = 'awaiting_approval', input = COALESCE($1, input), updated_at = now() WHERE run_id = $2 AND node_id = $3`
 	_, err = s.db.ExecContext(ctx, query, inputJson, runId, nodeId)
 	return err
+}
+
+func (s *Store) ResetToPending(ctx context.Context, runId, nodeId string) (bool, error) {
+	const query = `UPDATE node_states SET status = 'pending', error = NULL, updated_at = now() WHERE run_id = $1 AND node_id = $2 AND status = 'failed'`
+	res, err := s.db.ExecContext(ctx, query, runId, nodeId)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }

@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Workflow debugger — customer_support_v1</title>
+<style>
+  :root{
+    --bg:#f5f5f2;
+    --panel:#ffffff;
+    --border:#e0dfd9;
+    --border-strong:#c7c5bb;
+    --text:#1c1c19;
+    --text-muted:#6d6c64;
+    --text-faint:#9c9a90;
+    --mono: ui-monospace, "SFMono-Regular", "IBM Plex Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --accent:#2b4bd6;
+    --accent-dark:#1c3399;
+    --c-pending:#9a988f;
+    --c-running:#2b6cd6;
+    --c-completed:#1f8a4c;
+    --c-failed:#c23a3a;
+    --c-skipped:#b8b6ad;
+    --c-awaiting:#b8790f;
+    --radius:8px;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:var(--sans); font-size:14px; line-height:1.5;
+  }
+  a{color:var(--accent);}
+  :focus-visible{outline:2px solid var(--accent); outline-offset:2px;}
+
+  header{
+    border-bottom:1px solid var(--border);
+    background:var(--panel);
+    padding:16px 24px;
+    display:flex; align-items:baseline; justify-content:space-between; gap:12px;
+    flex-wrap:wrap;
+  }
+  header h1{font-size:16px; font-weight:600; margin:0;}
+  header .sub{font-family:var(--mono); font-size:12px; color:var(--text-muted);}
+  #poll-indicator{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-muted);}
+  #poll-dot{width:7px; height:7px; border-radius:50%; background:var(--c-pending);}
+  #poll-dot.live{background:var(--c-running); animation:pulse 1.6s ease-in-out infinite;}
+  @media (prefers-reduced-motion: reduce){ #poll-dot.live{animation:none;} }
+  @keyframes pulse{0%,100%{opacity:1;} 50%{opacity:.35;}}
+
+  main{max-width:900px; margin:0 auto; padding:24px;}
+
+  #submit-panel{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:20px; margin-bottom:24px;
+  }
+  #submit-panel label{display:block; font-size:12px; font-weight:600; margin-bottom:8px; color:var(--text-muted); text-transform:uppercase; letter-spacing:.03em;}
+  #req-text{
+    width:100%; min-height:80px; padding:10px 12px; border:1px solid var(--border-strong);
+    border-radius:6px; font-family:var(--sans); font-size:14px; resize:vertical; background:#fff; color:var(--text);
+  }
+  .btn{
+    appearance:none; border:none; border-radius:6px; padding:9px 16px; font-size:13px; font-weight:600;
+    cursor:pointer; font-family:var(--sans);
+  }
+  .btn-primary{background:var(--accent); color:#fff;}
+  .btn-primary:hover{background:var(--accent-dark);}
+  .btn-primary:disabled{background:var(--c-pending); cursor:not-allowed;}
+  .btn-outline{background:#fff; border:1px solid var(--border-strong); color:var(--text);}
+  .btn-outline:hover{border-color:var(--text-muted);}
+  .btn-outline:disabled{color:var(--text-faint); cursor:not-allowed;}
+  .btn-approve{background:var(--c-completed); color:#fff;}
+  .btn-reject{background:var(--c-failed); color:#fff;}
+  #submit-row{display:flex; justify-content:flex-end; margin-top:10px;}
+
+  #run-panel{display:none;}
+  #run-panel.visible{display:block;}
+  #run-meta{
+    display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px;
+    margin-bottom:16px;
+  }
+  #run-id{font-family:var(--mono); font-size:12px; color:var(--text-muted);}
+  #overall-status{
+    font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+    padding:4px 10px; border-radius:20px; background:var(--c-pending); color:#fff;
+  }
+  #overall-status.running{background:var(--c-running);}
+  #overall-status.completed{background:var(--c-completed);}
+  #overall-status.attention{background:var(--c-failed);}
+  #overall-status.awaiting{background:var(--c-awaiting);}
+
+  #reply-banner{
+    display:none; background:#eaf6ee; border:1px solid #b7ddc3; border-radius:var(--radius);
+    padding:18px; margin-bottom:20px;
+  }
+  #reply-banner.visible{display:block;}
+  #reply-banner .label{font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--c-completed); margin-bottom:6px;}
+  #reply-banner .text{font-size:15px;}
+
+  .tier{position:relative; margin-bottom:8px;}
+  .tier-connector{
+    width:1px; height:20px; background:var(--border-strong); margin:0 auto;
+  }
+  .tier-connector::after{content:''; display:block;}
+  .tier-row{display:grid; gap:12px; grid-template-columns:repeat(var(--cols,1), 1fr);}
+
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:var(--radius);
+    padding:12px 14px; transition:border-color .15s;
+  }
+  .card.status-running{border-color:var(--c-running);}
+  .card.status-failed{border-color:var(--c-failed);}
+  .card.status-awaiting_approval{border-color:var(--c-awaiting); box-shadow:0 0 0 3px rgba(184,121,15,0.1);}
+  .card-head{display:flex; align-items:center; justify-content:space-between; gap:8px; cursor:pointer;}
+  .card-title{font-size:13px; font-weight:600;}
+  .card-id{font-family:var(--mono); font-size:11px; color:var(--text-faint); display:block; margin-top:1px;}
+  .badge{
+    font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.03em;
+    padding:3px 8px; border-radius:20px; color:#fff; white-space:nowrap;
+  }
+  .badge.pending{background:var(--c-pending);}
+  .badge.running{background:var(--c-running);}
+  .badge.completed{background:var(--c-completed);}
+  .badge.failed{background:var(--c-failed);}
+  .badge.skipped{background:var(--c-skipped); color:#5b5a53;}
+  .badge.awaiting_approval{background:var(--c-awaiting);}
+  .card.status-skipped{opacity:.55;}
+  .card.status-skipped .card-title{text-decoration:line-through;}
+
+  .card-meta{font-size:11px; color:var(--text-faint); margin-top:6px; font-family:var(--mono);}
+  .card-detail{margin-top:10px; padding-top:10px; border-top:1px solid var(--border); display:none;}
+  .card-detail.open{display:block;}
+  .card-detail h4{font-size:10px; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); margin:8px 0 4px;}
+  .card-detail h4:first-child{margin-top:0;}
+  .card-detail pre{
+    background:#faf9f6; border:1px solid var(--border); border-radius:5px; padding:8px;
+    font-family:var(--mono); font-size:11px; margin:0; overflow-x:auto; white-space:pre-wrap; word-break:break-word;
+  }
+  .card-detail .err{color:var(--c-failed); font-family:var(--mono); font-size:11px;}
+  .card-actions{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
+  .card-actions .btn{padding:6px 12px; font-size:12px;}
+
+  #toast{
+    position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
+    background:#231f1a; color:#fff; padding:10px 16px; border-radius:6px; font-size:13px;
+    display:none; max-width:90vw;
+  }
+  #toast.visible{display:block;}
+
+  @media (max-width:640px){
+    .tier-row{grid-template-columns:1fr !important;}
+    main{padding:16px;}
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Workflow debugger</h1>
+    <div class="sub">customer_support_v1</div>
+  </div>
+  <div id="poll-indicator"><span id="poll-dot"></span><span id="poll-label">idle</span></div>
+</header>
+
+<main>
+
+  <section id="submit-panel">
+    <label for="req-text">Customer request</label>
+    <textarea id="req-text" placeholder="e.g. My invoice charge looks wrong this month, can you check?"></textarea>
+    <div id="submit-row">
+      <button class="btn btn-primary" id="submit-btn">Submit request</button>
+    </div>
+  </section>
+
+  <section id="run-panel">
+    <div id="run-meta">
+      <div id="run-id"></div>
+      <div id="overall-status">running</div>
+    </div>
+
+    <div id="reply-banner">
+      <div class="label">Final reply</div>
+      <div class="text" id="reply-text"></div>
+    </div>
+
+    <div id="dag"></div>
+  </section>
+
+</main>
+
+<div id="toast"></div>
+
+<script>
+const API_BASE = "http://localhost:8080"; // adjust to your server's address
+
+const TIERS = [
+  [{id:'input', label:'Input'}],
+  [{id:'classify', label:'Classify'}, {id:'fetch_customer', label:'Fetch customer'}, {id:'fetch_account', label:'Fetch account'}],
+  [{id:'choose_path', label:'Choose path'}],
+  [{id:'create_linear_issue', label:'Create Linear issue'}, {id:'check_invoice', label:'Check invoice'}, {id:'human_approval', label:'Human approval'}],
+  [{id:'draft_reply_bug', label:'Draft reply (bug)'}, {id:'draft_reply_billing', label:'Draft reply (billing)'}, {id:'draft_reply_unclear', label:'Draft reply (unclear)'}],
+];
+const TERMINAL_NODES = ['draft_reply_bug', 'draft_reply_billing', 'draft_reply_unclear'];
+
+let runId = null;
+let pollTimer = null;
+let expanded = new Set();
+let busyNodes = new Set(); // nodes with an in-flight retry/approval call
+let dagBuilt = false;
+
+const $ = (sel) => document.querySelector(sel);
+
+function showToast(msg) {
+  const el = $('#toast');
+  el.textContent = msg;
+  el.classList.add('visible');
+  clearTimeout(showToast._t);
+  showToast._t = setTimeout(() => el.classList.remove('visible'), 4500);
+}
+
+function setPolling(active) {
+  $('#poll-dot').classList.toggle('live', active);
+  $('#poll-label').textContent = active ? 'polling' : 'idle';
+}
+
+async function apiFetch(path, options) {
+  let res;
+  try {
+    res = await fetch(API_BASE + path, options);
+  } catch (e) {
+    throw new Error('Could not reach the server — is it running at ' + API_BASE + '?');
+  }
+  let body = null;
+  try { body = await res.json(); } catch (e) { /* empty body is fine */ }
+  if (!res.ok) {
+    const msg = (body && body.Error) ? body.Error : ('Request failed (' + res.status + ')');
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
+  return body;
+}
+
+// ---- submit ----
+
+$('#submit-btn').addEventListener('click', async () => {
+  const text = $('#req-text').value.trim();
+  if (!text) { showToast('Enter a request first.'); return; }
+
+  const btn = $('#submit-btn');
+  btn.disabled = true;
+  try {
+    const data = await apiFetch('/v1/req', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({req: text}),
+    });
+    runId = data.req_id;
+    expanded = new Set();
+    busyNodes = new Set();
+    $('#run-id').textContent = 'run: ' + runId;
+    $('#run-panel').classList.add('visible');
+    $('#reply-banner').classList.remove('visible');
+    buildDag();
+    startPolling();
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
+// ---- dag rendering ----
+
+function buildDag() {
+  const dag = $('#dag');
+  dag.innerHTML = '';
+  TIERS.forEach((tier, i) => {
+    if (i > 0) {
+      const conn = document.createElement('div');
+      conn.className = 'tier-connector';
+      dag.appendChild(conn);
+    }
+    const wrap = document.createElement('div');
+    wrap.className = 'tier';
+    const row = document.createElement('div');
+    row.className = 'tier-row';
+    row.style.setProperty('--cols', tier.length);
+    tier.forEach(n => {
+      const card = document.createElement('div');
+      card.className = 'card status-pending';
+      card.id = 'card-' + n.id;
+      card.innerHTML = `
+        <div class="card-head" data-toggle="${n.id}">
+          <div>
+            <div class="card-title">${n.label}</div>
+            <span class="card-id">${n.id}</span>
+          </div>
+          <span class="badge pending" id="badge-${n.id}">pending</span>
+        </div>
+        <div class="card-meta" id="meta-${n.id}"></div>
+        <div class="card-detail" id="detail-${n.id}"></div>
+      `;
+      row.appendChild(card);
+    });
+    wrap.appendChild(row);
+    dag.appendChild(wrap);
+  });
+  dag.querySelectorAll('[data-toggle]').forEach(el => {
+    el.addEventListener('click', () => {
+      const id = el.getAttribute('data-toggle');
+      if (expanded.has(id)) expanded.delete(id); else expanded.add(id);
+      $('#detail-' + id).classList.toggle('open', expanded.has(id));
+    });
+  });
+  dagBuilt = true;
+}
+
+function pretty(obj) {
+  if (obj === null || obj === undefined) return '—';
+  try { return JSON.stringify(obj, null, 2); } catch (e) { return String(obj); }
+}
+
+function renderNode(node, state) {
+  const status = state ? state.Status : 'pending';
+  const card = document.getElementById('card-' + node.id);
+  const badge = document.getElementById('badge-' + node.id);
+  const meta = document.getElementById('meta-' + node.id);
+  const detail = document.getElementById('detail-' + node.id);
+
+  card.className = 'card status-' + status;
+  badge.className = 'badge ' + status;
+  badge.textContent = status.replace('_', ' ');
+
+  const attempts = state ? state.AttemptCount : 0;
+  meta.textContent = attempts > 0 ? `attempts: ${attempts}` : '';
+
+  const isApproval = node.id === 'human_approval';
+  const forceOpen = isApproval && status === 'awaiting_approval';
+  const isOpen = expanded.has(node.id) || forceOpen;
+  detail.classList.toggle('open', isOpen);
+
+  let html = '';
+  html += `<h4>Input</h4><pre>${pretty(state && state.Input)}</pre>`;
+  html += `<h4>Output</h4><pre>${pretty(state && state.Output)}</pre>`;
+  if (state && state.Error) {
+    html += `<h4>Error</h4><div class="err">${escapeHtml(state.Error)}</div>`;
+  }
+
+  let actions = '';
+  if (status === 'failed') {
+    const busy = busyNodes.has(node.id);
+    actions += `<button class="btn btn-outline retry-btn" data-node="${node.id}" ${busy ? 'disabled' : ''}>${busy ? 'Retrying…' : 'Retry node'}</button>`;
+  }
+  if (isApproval && status === 'awaiting_approval') {
+    const busy = busyNodes.has(node.id);
+    actions += `<button class="btn btn-approve approve-btn" data-decision="approved" ${busy ? 'disabled' : ''}>Approve</button>`;
+    actions += `<button class="btn btn-reject approve-btn" data-decision="rejected" ${busy ? 'disabled' : ''}>Reject</button>`;
+  }
+  if (actions) html += `<div class="card-actions">${actions}</div>`;
+
+  detail.innerHTML = html;
+
+  detail.querySelectorAll('.retry-btn').forEach(b => b.addEventListener('click', () => retryNode(node.id)));
+  detail.querySelectorAll('.approve-btn').forEach(b => b.addEventListener('click', () => submitApproval(b.dataset.decision)));
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+
+function updateOverallStatus(states) {
+  const el = $('#overall-status');
+  const completedTerminal = TERMINAL_NODES.find(id => states[id] && states[id].Status === 'completed');
+  const anyFailed = Object.values(states).some(s => s.Status === 'failed');
+  const awaiting = states['human_approval'] && states['human_approval'].Status === 'awaiting_approval';
+
+  if (completedTerminal) {
+    el.textContent = 'Completed';
+    el.className = 'completed';
+    $('#reply-text').textContent = (states[completedTerminal].Output && states[completedTerminal].Output.reply) || '(no reply text found)';
+    $('#reply-banner').classList.add('visible');
+    stopPolling();
+  } else if (awaiting) {
+    el.textContent = 'Awaiting approval';
+    el.className = 'awaiting';
+  } else if (anyFailed) {
+    el.textContent = 'Attention needed';
+    el.className = 'attention';
+  } else {
+    el.textContent = 'Running';
+    el.className = 'running';
+  }
+}
+
+// ---- polling ----
+
+function startPolling() {
+  stopPolling();
+  setPolling(true);
+  pollState();
+  pollTimer = setInterval(pollState, 2000);
+}
+
+function stopPolling() {
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = null;
+  setPolling(false);
+}
+
+async function pollState() {
+  if (!runId) return;
+  let states;
+  try {
+    states = await apiFetch(`/v1/runs/${runId}/state`);
+  } catch (e) {
+    if (e.status === 404) return; // run row not written yet — try again next tick
+    showToast(e.message);
+    return;
+  }
+  TIERS.flat().forEach(node => renderNode(node, states[node.id]));
+  updateOverallStatus(states);
+}
+
+// ---- actions ----
+
+async function retryNode(nodeId) {
+  busyNodes.add(nodeId);
+  renderCurrent();
+  try {
+    await apiFetch(`/v1/runs/${runId}/nodes/${nodeId}/retry`, {method: 'POST'});
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    busyNodes.delete(nodeId);
+    pollState();
+  }
+}
+
+async function submitApproval(decision) {
+  const nodeId = 'human_approval';
+  busyNodes.add(nodeId);
+  renderCurrent();
+  try {
+    await apiFetch(`/v1/runs/${runId}/approval`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({decision}),
+    });
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    busyNodes.delete(nodeId);
+    pollState();
+  }
+}
+
+function renderCurrent() {
+  // re-render disabled states immediately without waiting for the next poll
+  TIERS.flat().forEach(node => {
+    const detail = document.getElementById('detail-' + node.id);
+    detail.querySelectorAll('button').forEach(b => {
+      if (busyNodes.has(node.id)) b.setAttribute('disabled', 'true');
+    });
+  });
+}
+</script>
+</body>
+</html>
