@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 
 	_ "github.com/lib/pq"
@@ -16,7 +17,8 @@ type Store struct{ db *sql.DB }
 
 func NewStore() (*Store, error) {
 	dbPassword := os.Getenv("DB_PASSWORD")
-	connStr := fmt.Sprintf("host=127.0.0.1 port=5432 user=postgres dbname=postgres password=%s sslmode=disable", dbPassword)
+	slog.Info("db pass", "pass", dbPassword)
+	connStr := fmt.Sprintf("postgres://postgres:%s@127.0.0.1:5432/postgres?sslmode=disable", dbPassword)
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
@@ -24,7 +26,9 @@ func NewStore() (*Store, error) {
 	if err := db.Ping(); err != nil {
 		return nil, fmt.Errorf("pinging db: %w", err)
 	}
-	return &Store{db: db}, nil
+	store := &Store{db: db}
+	store.InitSchema(context.Background())
+	return store, nil
 }
 
 // InitSchema uses IF NOT EXISTS (a deliberate addition to your DDL) so the
@@ -45,6 +49,7 @@ func (s *Store) InitSchema(ctx context.Context) error {
 
 	CREATE TABLE IF NOT EXISTS node_states (
 		run_id UUID NOT NULL REFERENCES workflow_runs(id) ON DELETE CASCADE,
+		initial_request string
 		node_id TEXT NOT NULL,
 		status TEXT NOT NULL DEFAULT 'pending',
 		input JSONB,

@@ -57,7 +57,7 @@ func (s *DAGWorkflow) Run(ctx context.Context, stop context.CancelFunc) (err err
 	return nil
 }
 
-func (s *DAGWorkflow) newHTTPHandler() *http.ServeMux {
+func (s *DAGWorkflow) newHTTPHandler() http.Handler {
 	r := http.NewServeMux()
 	r.HandleFunc("POST /v1/req", convertToHandleFunc(s.SubmitRequest))
 	r.HandleFunc("GET /v1/runs/{id}/state", convertToHandleFunc(s.GetNodeStates))
@@ -65,7 +65,7 @@ func (s *DAGWorkflow) newHTTPHandler() *http.ServeMux {
 	r.HandleFunc("GET /v1/runs/{id}/approval", convertToHandleFunc(s.PollHumanApprovalNode))
 	r.HandleFunc("POST /v1/runs/{id}/approval", convertToHandleFunc(s.SubmittingHumanApproval))
 	r.HandleFunc("POST /v1/runs/{id}/nodes/{nodeId}/retry", convertToHandleFunc(s.RetryNode))
-	return r
+	return RunContextMiddleware(r)
 }
 
 type apiFunc func(w http.ResponseWriter, r *http.Request) *APIError
@@ -93,7 +93,9 @@ func convertToHandleFunc(f apiFunc) http.HandlerFunc {
 }
 
 type SubmitRequestStruct struct {
-	Request string `json:"req"`
+	Request    string `json:"req"`
+	AccountId  string `json:"accountId"`
+	CustomerId string `json:"customerId"`
 }
 
 // This is the main function that gives the request to the DAG executor.
@@ -114,13 +116,19 @@ func (s *DAGWorkflow) SubmitRequest(w http.ResponseWriter, r *http.Request) *API
 	}
 	defer r.Body.Close()
 	id := uuid.NewString()
+	slog.Info("Got a request", "request", reqBody.Request)
 	inputMap := make(map[string]any)
 	inputMap["request"] = reqBody.Request
+	inputMap["accountId"] = reqBody.AccountId
+	inputMap["customerId"] = reqBody.CustomerId
+
+	slog.Debug("INPUT MAP REQUEST", "request", inputMap["request"])
 	ctx := context.WithoutCancel(r.Context())
 	err := s.executor.Run(ctx, id, "customer_support_v1", inputMap)
 	if err != nil {
 		return &APIError{
 			Status:  http.StatusInternalServerError,
+			Error:   err,
 			Message: "We are experiencing some difficulties right now. Please try again later. ",
 		}
 	}

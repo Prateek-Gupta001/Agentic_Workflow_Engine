@@ -12,11 +12,15 @@ import (
 	"github.com/Prateek-Gupta001/libraAIAssignment/api"
 	"github.com/Prateek-Gupta001/libraAIAssignment/nodes"
 	"github.com/Prateek-Gupta001/libraAIAssignment/store"
+	"github.com/joho/godotenv"
 )
 
 func main() {
 	opts := returnOpts()
-	ctx := context.Background()
+	err := godotenv.Load()
+	if err != nil {
+		slog.Error("got this error while trying to load a dotenv file", "error", err)
+	}
 	logger := slog.New(slog.NewTextHandler(os.Stdout, opts))
 	slog.SetDefault(logger)
 	store, err := store.NewStore()

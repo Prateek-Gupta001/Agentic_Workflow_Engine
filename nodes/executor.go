@@ -46,16 +46,33 @@ func NewCustomerSupportExecutor(s *store.Store) *CustomerSupportExecutor {
 }
 
 func (e *CustomerSupportExecutor) Run(ctx context.Context, runId string, workflowId string, input map[string]any) error {
+
 	runId, err := e.store.CreateRun(ctx, runId, workflowId, input, AllNodes)
 	if err != nil {
 		return err
 	}
+	// Input has no dependencies to inherit from, so it's the one node whose
+	// input can't come from GetInputMap — nothing has completed yet. Run it
+	// directly, through the same three calls dispatchReady would use, then
+	// let the generic loop take over from here.
+	if err := e.store.MarkAsRunning(ctx, runId, string(Input), input); err != nil {
+		return err
+	}
+	output, err := e.nodes[Input].Execute(ctx, input)
+	if err != nil {
+		return e.store.MarkAsFailed(ctx, runId, string(Input), input, err.Error())
+	}
+	if err := e.store.SaveNodeProgress(ctx, runId, string(Input), input, output); err != nil {
+		return err
+	}
+
 	return e.dispatchReady(ctx, runId)
 }
 
 func (e *CustomerSupportExecutor) dispatchReady(ctx context.Context, runId string) error {
 	for {
 		nodeStates, err := e.store.GetNodeStates(ctx, runId)
+
 		if err != nil {
 			return err
 		}
@@ -270,6 +287,7 @@ func computeSkipSet(chosenBranch string, deps map[NodeType][]NodeType) []string 
 	for nodeType := range skip {
 		result = append(result, string(nodeType))
 	}
+	slog.Info("For this chosen branch", "branch", chosenBranch, "the skip set computed is this", result)
 	return result
 }
 

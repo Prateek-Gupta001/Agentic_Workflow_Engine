@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"maps"
 )
 
@@ -53,6 +54,7 @@ type InputNode struct{}
 
 func (i *InputNode) Type() NodeType { return Input }
 func (i *InputNode) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
+	slog.Info("INPUT NODE IS GETTING THIS AS THE INPUT MAP", "input map", input)
 	//need to validate that we got a "request" in the map.
 	//need to put it in the map and return it.
 	if _, ok := input["request"]; ok != true {
@@ -126,6 +128,7 @@ func (i *ChoosePathNode) Execute(ctx context.Context, input map[string]any) (map
 	}
 	out := maps.Clone(input)
 	out["branch"] = input["task"]
+	slog.Info("Map after choose path execution", "map", out)
 	return out, nil
 }
 
@@ -148,9 +151,9 @@ func (n *CreateLinearIssueNode) Execute(ctx context.Context, input map[string]an
 }
 
 func mockCreateLinearIssue(text string, attempt int) (string, error) {
-	if attempt < 2 {
-		return "", errors.New("mock Linear API timeout")
-	}
+	// if attempt < 2 {
+	// 	return "", errors.New("mock Linear API timeout")
+	// }
 	return "MOCK-LINEAR-ISSUE-42", nil
 }
 
@@ -202,12 +205,12 @@ type DraftReplyBillingNode struct{}
 
 func (n *DraftReplyBillingNode) Type() NodeType { return DraftReplyBilling }
 func (n *DraftReplyBillingNode) Execute(ctx context.Context, input map[string]any) (map[string]any, error) {
-	invoice, ok := input["invoice"].(map[string]any)
+	invoice, ok := input["invoice"].(string)
 	if !ok {
 		return nil, errors.New("invoice field is required")
 	}
 	out := maps.Clone(input)
-	out["reply"] = mockDraftReply(fmt.Sprintf("invoice %v is %v", invoice["invoiceId"], invoice["status"]))
+	out["reply"] = mockDraftReply(fmt.Sprintf("invoice is being checked %s", invoice))
 	return out, nil
 }
 

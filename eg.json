@@ -1,0 +1,194 @@
+{
+    "check_invoice": {
+        "NodeID": "check_invoice",
+        "Status": "completed",
+        "Input": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "branch": "billing",
+            "customerContext": null,
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "billing"
+        },
+        "Output": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "branch": "billing",
+            "customerContext": null,
+            "customerId": "13",
+            "invoice": "MOCK-INVOICE",
+            "request": "Can you please check my invoice",
+            "task": "billing"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    },
+    "choose_path": {
+        "NodeID": "choose_path",
+        "Status": "completed",
+        "Input": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "customerContext": null,
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "billing"
+        },
+        "Output": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "branch": "billing",
+            "customerContext": null,
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "billing"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    },
+    "classify": {
+        "NodeID": "classify",
+        "Status": "completed",
+        "Input": {
+            "_attempt": 1,
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Output": {
+            "_attempt": 1,
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "billing"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    },
+    "create_linear_issue": {
+        "NodeID": "create_linear_issue",
+        "Status": "skipped",
+        "Input": null,
+        "Output": null,
+        "Error": "",
+        "AttemptCount": 0
+    },
+    "draft_reply_billing": {
+        "NodeID": "draft_reply_billing",
+        "Status": "completed",
+        "Input": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "branch": "billing",
+            "customerContext": null,
+            "customerId": "13",
+            "invoice": "MOCK-INVOICE",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Output": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "branch": "billing",
+            "customerContext": null,
+            "customerId": "13",
+            "invoice": "MOCK-INVOICE",
+            "reply": "Thanks for reaching out — here's what we found: invoice is being checked MOCK-INVOICE",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    },
+    "draft_reply_bug": {
+        "NodeID": "draft_reply_bug",
+        "Status": "skipped",
+        "Input": null,
+        "Output": null,
+        "Error": "",
+        "AttemptCount": 0
+    },
+    "draft_reply_unclear": {
+        "NodeID": "draft_reply_unclear",
+        "Status": "skipped",
+        "Input": null,
+        "Output": null,
+        "Error": "",
+        "AttemptCount": 0
+    },
+    "fetch_account": {
+        "NodeID": "fetch_account",
+        "Status": "completed",
+        "Input": {
+            "_attempt": 1,
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Output": {
+            "_attempt": 1,
+            "accountContext": null,
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    },
+    "fetch_customer": {
+        "NodeID": "fetch_customer",
+        "Status": "completed",
+        "Input": {
+            "_attempt": 1,
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Output": {
+            "_attempt": 1,
+            "accountId": "12",
+            "customerContext": null,
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    },
+    "human_approval": {
+        "NodeID": "human_approval",
+        "Status": "skipped",
+        "Input": null,
+        "Output": null,
+        "Error": "",
+        "AttemptCount": 0
+    },
+    "input": {
+        "NodeID": "input",
+        "Status": "completed",
+        "Input": {
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice"
+        },
+        "Output": {
+            "accountId": "12",
+            "customerId": "13",
+            "request": "Can you please check my invoice",
+            "task": "Can you please check my invoice"
+        },
+        "Error": "",
+        "AttemptCount": 1
+    }
+}
