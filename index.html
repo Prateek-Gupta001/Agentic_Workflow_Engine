@@ -144,6 +144,30 @@
   .card-actions{margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;}
   .card-actions .btn{padding:6px 12px; font-size:12px;}
 
+  .log-list{display:flex; flex-direction:column; gap:0; margin-top:2px;}
+  .log-row{
+    display:flex; flex-direction:column; gap:4px; font-size:11px;
+    padding:6px 0; border-bottom:1px solid var(--border);
+  }
+  .log-row:last-child{border-bottom:none;}
+  .log-meta-line{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .log-status{
+    flex:0 0 auto; font-weight:700; text-transform:uppercase; letter-spacing:.02em; font-size:9px;
+    padding:2px 6px; border-radius:10px; color:#fff; font-family:var(--sans);
+  }
+  .log-status.running{background:var(--c-running);}
+  .log-status.completed{background:var(--c-completed);}
+  .log-status.failed{background:var(--c-failed);}
+  .log-status.skipped{background:var(--c-skipped); color:#5b5a53;}
+  .log-status.awaiting_approval{background:var(--c-awaiting);}
+  .log-time{flex:0 0 auto; color:var(--text-faint); font-family:var(--mono);}
+  .log-attempt{flex:0 0 auto; color:var(--text-faint); font-family:var(--mono);}
+  .log-message{
+    color:var(--text); line-height:1.4;
+    overflow-wrap:break-word; word-break:normal;
+  }
+  .log-empty{font-size:12px; color:var(--text-muted); padding:4px 0;}
+
   #toast{
     position:fixed; bottom:20px; left:50%; transform:translateX(-50%);
     background:#231f1a; color:#fff; padding:10px 16px; border-radius:6px; font-size:13px;
@@ -255,6 +279,9 @@ let runId = null;
 let pollTimer = null;
 let expanded = new Set();
 let busyNodes = new Set(); // nodes with an in-flight retry/approval call
+let nodeEvents = {}; // node_id -> event history for the currently open run
+let logsOpen = new Set(); // node ids whose event log panel is expanded
+let lastStates = {}; // most recent /state response, for on-demand single-node re-renders
 let dagBuilt = false;
 
 const $ = (sel) => document.querySelector(sel);
@@ -318,6 +345,8 @@ function openRun(id) {
   runId = id;
   expanded = new Set();
   busyNodes = new Set();
+  nodeEvents = {};
+  logsOpen = new Set();
   $('#run-id').textContent = 'run: ' + runId;
   $('#run-panel').classList.add('visible');
   $('#reply-banner').classList.remove('visible');
@@ -500,12 +529,64 @@ function renderNode(node, state) {
     actions += `<button class="btn btn-approve approve-btn" data-decision="approved" ${busy ? 'disabled' : ''}>Approve</button>`;
     actions += `<button class="btn btn-reject approve-btn" data-decision="rejected" ${busy ? 'disabled' : ''}>Reject</button>`;
   }
-  if (actions) html += `<div class="card-actions">${actions}</div>`;
+  actions += `<button class="btn btn-outline logs-btn" data-node="${node.id}">${logsOpen.has(node.id) ? 'Hide logs' : 'Show logs'}</button>`;
+  html += `<div class="card-actions">${actions}</div>`;
+
+  if (logsOpen.has(node.id)) {
+    html += `<h4>Event log</h4>${renderLogList(nodeEvents[node.id])}`;
+  }
 
   detail.innerHTML = html;
 
   detail.querySelectorAll('.retry-btn').forEach(b => b.addEventListener('click', () => retryNode(node.id)));
   detail.querySelectorAll('.approve-btn').forEach(b => b.addEventListener('click', () => submitApproval(b.dataset.decision)));
+  detail.querySelectorAll('.logs-btn').forEach(b => b.addEventListener('click', () => toggleLogs(node.id)));
+}
+
+function renderLogList(entry) {
+  if (!entry) return '<div class="log-empty">Loading…</div>';
+  if (entry.error) return `<div class="err">${escapeHtml(entry.error)}</div>`;
+  if (entry.length === 0) return '<div class="log-empty">No events recorded yet.</div>';
+  return '<div class="log-list">' + entry.map(ev => `
+    <div class="log-row">
+      <div class="log-meta-line">
+        <span class="log-status ${ev.status}">${ev.status.replace('_', ' ')}</span>
+        <span class="log-time">${formatLogTime(ev.created_at)}</span>
+        <span class="log-attempt">attempt ${ev.attempt_count}</span>
+      </div>
+      ${ev.message ? `<div class="log-message">${escapeHtml(ev.message)}</div>` : ''}
+    </div>`).join('') + '</div>';
+}
+
+function formatLogTime(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return '';
+  return d.toLocaleTimeString(undefined, {hour: '2-digit', minute: '2-digit', second: '2-digit'});
+}
+
+// Toggling logs re-renders just this one card immediately from lastStates,
+// rather than waiting up to 2s for the next poll tick to pick up the change.
+function toggleLogs(nodeId) {
+  if (logsOpen.has(nodeId)) {
+    logsOpen.delete(nodeId);
+  } else {
+    logsOpen.add(nodeId);
+    loadNodeEvents(nodeId);
+  }
+  const node = TIERS.flat().find(n => n.id === nodeId);
+  renderNode(node, lastStates[nodeId]);
+  drawEdges();
+}
+
+async function loadNodeEvents(nodeId) {
+  try {
+    nodeEvents[nodeId] = await apiFetch(`/v1/runs/${runId}/nodes/${nodeId}/events`);
+  } catch (e) {
+    nodeEvents[nodeId] = {error: e.message};
+  }
+  const node = TIERS.flat().find(n => n.id === nodeId);
+  renderNode(node, lastStates[nodeId]);
+  drawEdges();
 }
 
 function escapeHtml(s) {
@@ -563,9 +644,11 @@ async function pollState() {
     showToast(e.message);
     return;
   }
+  lastStates = states;
   TIERS.flat().forEach(node => renderNode(node, states[node.id]));
   updateOverallStatus(states);
   drawEdges();
+  logsOpen.forEach(nodeId => loadNodeEvents(nodeId));
 }
 
 // ---- actions ----

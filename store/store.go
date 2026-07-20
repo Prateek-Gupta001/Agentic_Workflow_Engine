@@ -374,7 +374,41 @@ func (s *Store) FailRun(ctx context.Context, runId string) error {
 }
 
 func (s *Store) logEvent(ctx context.Context, tx *sql.Tx, runId, nodeId, status, message string, attemptCount int) error {
+	slog.Info("The message being sent right now are", "runId", runId, "nodeId", nodeId, "status", status, "message", message)
+
 	const query = `INSERT INTO node_events (run_id, node_id, status, message, attempt_count) VALUES ($1, $2, $3, $4, $5)`
 	_, err := tx.ExecContext(ctx, query, runId, nodeId, status, message, attemptCount)
 	return err
+}
+
+type NodeEvent struct {
+	NodeID       string
+	Status       string
+	Message      string
+	AttemptCount int
+	CreatedAt    time.Time
+}
+
+func (s *Store) GetNodeEvents(ctx context.Context, runId, nodeId string) ([]NodeEvent, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT node_id, status, message, attempt_count, created_at
+		 FROM node_events WHERE run_id = $1 AND node_id = $2 ORDER BY created_at ASC, id ASC`,
+		runId, nodeId)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var events []NodeEvent
+	for rows.Next() {
+		var e NodeEvent
+		var message sql.NullString
+		if err := rows.Scan(&e.NodeID, &e.Status, &message, &e.AttemptCount, &e.CreatedAt); err != nil {
+			return nil, err
+		}
+		e.Message = message.String
+		events = append(events, e)
+	}
+	slog.Info("The events being sent right now are", "runId", runId, "nodeId", nodeId, "events", events)
+	return events, rows.Err()
 }

@@ -20,6 +20,7 @@ type Executor interface {
 	GetNodeStatus(ctx context.Context, runId, nodeId string) (found bool, status string, err error)
 	SubmitRetry(ctx context.Context, runId, nodeId string) error
 	ListRecentRuns(ctx context.Context, limit int) ([]store.RunSummary, error)
+	GetNodeEvents(ctx context.Context, runId, nodeId string) ([]store.NodeEvent, error)
 }
 
 type CustomerSupportExecutor struct {
@@ -156,6 +157,10 @@ func (e *CustomerSupportExecutor) SubmitApproval(ctx context.Context, runId stri
 	inputMap := GetInputMap(nodeStates)
 	inputMap["humanDecision"] = decision
 
+	if err := e.store.MarkAsRunning(ctx, runId, string(HumanApproval), inputMap); err != nil {
+		return err
+	}
+
 	output, err := e.nodes[HumanApproval].Execute(ctx, inputMap)
 	if err != nil {
 		return e.store.MarkAsFailed(ctx, runId, string(HumanApproval), inputMap, err.Error())
@@ -164,7 +169,7 @@ func (e *CustomerSupportExecutor) SubmitApproval(ctx context.Context, runId stri
 		return err
 	}
 
-	return e.dispatchReady(ctx, runId) // resumes — DraftReplyUnclear is now unblocked
+	return e.dispatchReady(ctx, runId)
 }
 
 func (e *CustomerSupportExecutor) GetNodeStates(ctx context.Context, runId string) (map[string]store.NodeState, error) {
@@ -238,4 +243,8 @@ func (e *CustomerSupportExecutor) finalizeRun(ctx context.Context, runId string,
 
 func (e *CustomerSupportExecutor) ListRecentRuns(ctx context.Context, limit int) ([]store.RunSummary, error) {
 	return e.store.ListRecentRuns(ctx, limit)
+}
+
+func (e *CustomerSupportExecutor) GetNodeEvents(ctx context.Context, runId, nodeId string) ([]store.NodeEvent, error) {
+	return e.store.GetNodeEvents(ctx, runId, nodeId)
 }

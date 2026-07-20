@@ -90,6 +90,8 @@ func (s *DAGWorkflow) newHTTPHandler() http.Handler {
 	r.HandleFunc("POST /v1/runs/{id}/approval", convertToHandleFunc(s.SubmittingHumanApproval))
 	r.HandleFunc("POST /v1/runs/{id}/nodes/{nodeId}/retry", convertToHandleFunc(s.RetryNode))
 	r.HandleFunc("GET /v1/runs", convertToHandleFunc(s.ListRuns))
+	r.HandleFunc("GET /v1/runs/{id}/nodes/{nodeId}/events", convertToHandleFunc(s.GetNodeEvents))
+
 	return CorsMiddleware(RunContextMiddleware(r))
 }
 
@@ -336,5 +338,36 @@ func (s *DAGWorkflow) RetryNode(w http.ResponseWriter, r *http.Request) *APIErro
 	}()
 
 	WriteJSON(w, http.StatusAccepted, struct{}{})
+	return nil
+}
+
+type NodeEventResponse struct {
+	Status       string    `json:"status"`
+	Message      string    `json:"message"`
+	AttemptCount int       `json:"attempt_count"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+func (s *DAGWorkflow) GetNodeEvents(w http.ResponseWriter, r *http.Request) *APIError {
+	runId := r.PathValue("id")
+	nodeId := r.PathValue("nodeId")
+	if runId == "" || nodeId == "" {
+		return &APIError{Status: http.StatusBadRequest, Message: "run id and node id are required"}
+	}
+
+	events, err := s.executor.GetNodeEvents(r.Context(), runId, nodeId)
+	if err != nil {
+		return &APIError{
+			Status:  http.StatusInternalServerError,
+			Error:   err,
+			Message: "We are experiencing some difficulties right now. Please try again later.",
+		}
+	}
+
+	resp := make([]NodeEventResponse, 0, len(events))
+	for _, e := range events {
+		resp = append(resp, NodeEventResponse{Status: e.Status, Message: e.Message, AttemptCount: e.AttemptCount, CreatedAt: e.CreatedAt})
+	}
+	WriteJSON(w, http.StatusOK, resp)
 	return nil
 }

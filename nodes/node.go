@@ -151,10 +151,10 @@ func (n *CreateLinearIssueNode) Execute(ctx context.Context, input map[string]an
 }
 
 func mockCreateLinearIssue(text string, attempt int) (string, error) {
-	// if attempt < 2 {
-	// 	return "", errors.New("mock Linear API timeout")
-	// }
-	return "MOCK-LINEAR-ISSUE-42", nil
+	if attempt < 2 {
+		return "", errors.New("mock Linear API timeout")
+	}
+	return "MOCK-LINEAR-ISSUE-42" + text, nil
 }
 
 type CheckInvoiceNode struct{}
