@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
-	"github.com/Prateek-Gupta001/libraAIAssignment/store"
+	"github.com/Prateek-Gupta001/AgenticDAGWorkflow/store"
 )
 
 type Executor interface {
