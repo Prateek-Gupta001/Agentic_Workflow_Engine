@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/Prateek-Gupta001/libraAIAssignment/nodes"
+	"github.com/Prateek-Gupta001/AgenticDAGWorkflow/nodes"
 	"github.com/google/uuid"
 )
 

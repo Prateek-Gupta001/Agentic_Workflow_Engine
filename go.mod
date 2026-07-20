@@ -1,4 +1,4 @@
-module github.com/Prateek-Gupta001/libraAIAssignment
+module github.com/Prateek-Gupta001/AgenticDAGWorkflow
 
 go 1.26.4
 

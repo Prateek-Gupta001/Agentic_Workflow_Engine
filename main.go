@@ -9,9 +9,9 @@ import (
 	"strconv"
 	"syscall"
 
-	"github.com/Prateek-Gupta001/libraAIAssignment/api"
-	"github.com/Prateek-Gupta001/libraAIAssignment/nodes"
-	"github.com/Prateek-Gupta001/libraAIAssignment/store"
+	"github.com/Prateek-Gupta001/AgenticDAGWorkflow/api"
+	"github.com/Prateek-Gupta001/AgenticDAGWorkflow/nodes"
+	"github.com/Prateek-Gupta001/AgenticDAGWorkflow/store"
 	"github.com/joho/godotenv"
 )
 
