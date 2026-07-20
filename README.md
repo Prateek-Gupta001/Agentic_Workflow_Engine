@@ -42,7 +42,8 @@ You'll need Go and a Postgres instance reachable from wherever you run this.
 
 ```bash
 export DATABASE_URL="postgres://user:pass@localhost:5432/workflow_engine?sslmode=disable"
-go run ./cmd/server
+docker compose up -d 
+air
 ```
 
 The schema (`workflow_runs`, `node_states`, `node_events`) gets created automatically on startup via `CREATE TABLE IF NOT EXISTS` — no separate migration step, no seed data needed.
