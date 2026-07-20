@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/Prateek-Gupta001/libraAIAssignment/store"
+	"github.com/Prateek-Gupta001/AgenticDAGWorkflow/store"
 )
 
 func MockLLM(input string) string {
