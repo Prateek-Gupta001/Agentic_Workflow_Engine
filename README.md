@@ -45,6 +45,7 @@ export DATABASE_URL="postgres://user:pass@localhost:5432/workflow_engine?sslmode
 docker compose up -d 
 air
 ```
+For the UI run the index.html file. 
 
 The schema (`workflow_runs`, `node_states`, `node_events`) gets created automatically on startup via `CREATE TABLE IF NOT EXISTS` — no separate migration step, no seed data needed.
 
