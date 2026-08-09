@@ -17,7 +17,6 @@ type Store struct{ db *sql.DB }
 
 func NewStore() (*Store, error) {
 	dbPassword := os.Getenv("DB_PASSWORD")
-	slog.Info("db pass", "pass", dbPassword)
 	connStr := fmt.Sprintf("postgres://postgres:%s@127.0.0.1:5432/postgres?sslmode=disable", dbPassword)
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
