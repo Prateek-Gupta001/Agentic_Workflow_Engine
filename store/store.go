@@ -31,6 +31,8 @@ func NewStore() (*Store, error) {
 	}
 	store := &Store{db: db}
 	store.InitSchema(context.Background())
+	slog.Info("Db connection was succesful")
+
 	return store, nil
 }
 
