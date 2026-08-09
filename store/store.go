@@ -16,8 +16,12 @@ import (
 type Store struct{ db *sql.DB }
 
 func NewStore() (*Store, error) {
-	dbPassword := os.Getenv("DB_PASSWORD")
-	connStr := fmt.Sprintf("postgres://postgres:%s@127.0.0.1:5432/postgres?sslmode=disable", dbPassword)
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		// Fallback for local development
+		dbPassword := os.Getenv("DB_PASSWORD")
+		connStr = fmt.Sprintf("postgres://postgres:%s@127.0.0.1:5432/postgres?sslmode=disable", dbPassword)
+	}
 	db, err := sql.Open("postgres", connStr)
 	if err != nil {
 		return nil, fmt.Errorf("opening db: %w", err)
